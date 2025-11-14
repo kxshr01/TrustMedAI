@@ -1,0 +1,59 @@
+# -------------------------
+# Python / Backend
+# -------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Log files
+*.log
+
+# FastAPI / Uvicorn artifacts
+*.pid
+
+
+# -------------------------
+# FAISS / Embedding files
+# -------------------------
+*.index
+*.faiss
+*.npy
+*.npz
+*.pkl
+
+# -------------------------
+# Frontend
+# -------------------------
+# Node / npm
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Build artifacts (if you build React later)
+build/
+dist/
+
+# -------------------------
+# macOS system junk
+# -------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+
+# -------------------------
+# VS Code settings (optional)
+# -------------------------
+.vscode/
