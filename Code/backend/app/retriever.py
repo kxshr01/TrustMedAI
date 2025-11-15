@@ -76,10 +76,9 @@ def retrieve_chunks(query: str, k: int = 5):
 # ============================================================
 
 if __name__ == "__main__":
-    test_query = "What are the symptoms of type 2 diabetes?"
-    results = retrieve_chunks(test_query, k=3)
-
-    print("\n=== RETRIEVAL RESULTS ===")
-    for r in results:
-        print(f"\n[{r['rank']}] From {r['source']} → {r['section']} / {r['subsection']}")
-        print(r["text"])
+    q = "What are the symptoms of type 2 diabetes?"
+    hits = retrieve_chunks(q, k=3)
+    for h in hits:
+        print("\n---")
+        print(f"[{h['rank']}] {h['source']} → {h['section']} / {h['subsection']}")
+        print(h["text"])

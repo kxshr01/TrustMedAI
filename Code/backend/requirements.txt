@@ -8,3 +8,6 @@ beautifulsoup4
 lxml
 tqdm
 sentence-transformers
+openai
+python-dotenv
+google-genai

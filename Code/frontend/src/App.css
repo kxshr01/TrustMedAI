@@ -378,4 +378,34 @@ body {
   .message-bubble {
     max-width: 90%;
   }
+
+.expand-buttons {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.expand-btn {
+  background: #1e40af;
+  color: white;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  border: none;
+  cursor: pointer;
+}
+
+.expand-btn:hover {
+  background: #1d4ed8;
+}
+
+.collapsible-box {
+  margin-top: 10px;
+  padding: 12px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: #d1d5db;
+}
 }

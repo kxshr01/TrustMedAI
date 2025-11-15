@@ -18,7 +18,7 @@ function App() {
   const recognitionRef = useRef(null);
   const disease = "Type 2 Diabetes"; // fixed disease
 
-  // Set up browser speech recognition (Web Speech API)
+  // Speech recognition setup
   useEffect(() => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -50,55 +50,96 @@ function App() {
     recognitionRef.current = recognition;
   }, []);
 
-  // TODO: replace this with your real backend later
+  // ======================================================
+  // ✅ UPDATED: Real backend call
+  // ======================================================
   const callBackend = async (userMessage) => {
-    // Example for later:
-    /*
-    const res = await fetch("http://localhost:8000/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: userMessage,
-        disease: disease,
-      }),
-    });
-    const data = await res.json();
-    return data.answer;
-    */
+    try {
+      const res = await fetch("http://127.0.0.1:8000/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMessage,
+          disease: disease,
+        }),
+      });
 
-    // Temporary dummy response
-    return (
-      `Thanks for your question about **${disease}**.\n\n` +
-      `*(Dummy response for now)* You asked:\n> ${userMessage}\n\n` +
-      `In the final system, I will use online discussion themes + trusted medical sources to answer.`
-    );
+      if (!res.ok) {
+        console.error("Backend returned error:", res.status);
+        return "⚠️ Sorry, I couldn't reach the backend. Please try again.";
+      }
+
+      const data = await res.json();
+      return data.answer; // Use model’s answer
+    } catch (error) {
+      console.error("Network error:", error);
+      return "⚠️ A network error occurred while contacting the backend.";
+    }
   };
 
+  // ======================================================
+  // Sending messages
+  // ======================================================
   const handleSend = async () => {
     const trimmed = input.trim();
     if (!trimmed || isLoading) return;
 
+    // Add user message immediately
     const userMsg = { role: "user", content: trimmed };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
 
     try {
-      const answer = await callBackend(trimmed);
-      const botMsg = { role: "assistant", content: answer };
+      // ---- CALL BACKEND ----
+      const res = await fetch("http://127.0.0.1:8000/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: trimmed,
+          disease: "Type 2 Diabetes"
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Backend error");
+      }
+
+      const data = await res.json();
+
+      // ---- ASSISTANT MESSAGE FORMAT ----
+      const botMsg = {
+        role: "assistant",
+        content: data.answer,
+        sources: data.sources || [],
+        disclaimer: data.disclaimer || "⚠️ The information provided is for general educational purposes only and is not a substitute for medical advice.",
+        showSources: false,
+        showDisclaimer: false,
+      };
+
+      // Add assistant message
       setMessages((prev) => [...prev, botMsg]);
+
     } catch (err) {
-      console.error(err);
+      console.error("Chat backend error:", err);
+
       const errorMsg = {
         role: "assistant",
         content:
-          "Sorry, something went wrong while generating a response. Please try again.",
+          "⚠️ Sorry, I encountered an error retrieving the answer. Please try again.",
+        sources: [],
+        disclaimer: "",
+        showSources: false,
+        showDisclaimer: false
       };
+
       setMessages((prev) => [...prev, errorMsg]);
+
     } finally {
       setIsLoading(false);
     }
   };
+
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -107,6 +148,7 @@ function App() {
     }
   };
 
+  // Microphone button
   const handleMicClick = () => {
     if (!speechSupported) {
       alert(
@@ -123,9 +165,14 @@ function App() {
     }
   };
 
-  return (
+  // ======================================================
+  // UI
+  // ======================================================
+    return (
     <div className="app">
       <div className="app-inner">
+        
+        {/* HEADER */}
         <header className="app-header">
           <div className="app-title-row">
             <span className="logo">🩺</span>
@@ -135,7 +182,6 @@ function App() {
             </div>
           </div>
 
-          {/* LEFT: pill | RIGHT: reset */}
           <div className="pill-reset-bar">
             <span className="pill">Type 2 Diabetes</span>
 
@@ -158,9 +204,11 @@ function App() {
           </div>
         </header>
 
-
+        {/* CHAT + INPUT */}
         <main className="chat-container">
           <div className="chat-window">
+
+            {/* MESSAGES */}
             {messages.map((msg, idx) => (
               <div
                 key={idx}
@@ -173,8 +221,12 @@ function App() {
                 <div className="avatar">
                   {msg.role === "user" ? "🧑" : "🤖"}
                 </div>
+
                 <div className="message-bubble">
+                  
+                  {/* MAIN MESSAGE TEXT */}
                   {msg.content.split("\n").map((line, i) => {
+                    // blockquote handling
                     if (line.startsWith(">")) {
                       return (
                         <p key={i} className="quote">
@@ -182,6 +234,7 @@ function App() {
                         </p>
                       );
                     }
+
                     // simple **bold** handling
                     const parts = line.split(/(\*\*.*?\*\*)/g);
                     return (
@@ -199,10 +252,63 @@ function App() {
                       </p>
                     );
                   })}
+
+                  {/* ASSISTANT → SHOW BUTTONS */}
+                  {msg.role === "assistant" && msg.sources && (
+                    <div className="expand-buttons">
+                      <button
+                        className="expand-btn"
+                        onClick={() => {
+                          const newMsgs = [...messages];
+                          newMsgs[idx].showSources = !newMsgs[idx].showSources;
+                          setMessages(newMsgs);
+                        }}
+                      >
+                        {msg.showSources ? "Hide Sources" : "View Sources"}
+                      </button>
+
+                      <button
+                        className="expand-btn"
+                        onClick={() => {
+                          const newMsgs = [...messages];
+                          newMsgs[idx].showDisclaimer =
+                            !newMsgs[idx].showDisclaimer;
+                          setMessages(newMsgs);
+                        }}
+                      >
+                        {msg.showDisclaimer
+                          ? "Hide Disclaimer"
+                          : "Disclaimer"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* COLLAPSIBLE SOURCES */}
+                  {msg.showSources && msg.sources && (
+                    <div className="collapsible-box">
+                      <h4>Sources Used:</h4>
+                      <ul>
+                        {msg.sources.map((src, i) => (
+                          <li key={i}>
+                            {src.source} — {src.section}
+                            {src.subsection && ` / ${src.subsection}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* COLLAPSIBLE DISCLAIMER */}
+                  {msg.showDisclaimer && msg.disclaimer && (
+                    <div className="collapsible-box">
+                      <p>{msg.disclaimer}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
 
+            {/* TYPING INDICATOR */}
             {isLoading && (
               <div className="message-row assistant">
                 <div className="avatar">🤖</div>
@@ -215,6 +321,7 @@ function App() {
             )}
           </div>
 
+          {/* INPUT AREA */}
           <div className="input-area">
             <button
               className={`mic-btn ${isListening ? "listening" : ""}`}
@@ -232,6 +339,7 @@ function App() {
               onKeyDown={handleKeyDown}
               rows={2}
             />
+
             <button
               className="send-btn"
               onClick={handleSend}
@@ -242,6 +350,7 @@ function App() {
           </div>
         </main>
 
+        {/* FOOTER */}
         <footer className="app-footer">
           ⚠️ TrustMedAI is for educational purposes only and does not provide
           medical diagnoses or treatment decisions. Always consult a healthcare
@@ -250,6 +359,7 @@ function App() {
       </div>
     </div>
   );
+
 }
 
 export default App;
