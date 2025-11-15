@@ -7,8 +7,13 @@ function App() {
       role: "assistant",
       content:
         "Hi, I’m TrustMedAI. I can answer educational questions about Type 2 Diabetes. What would you like to know?",
+      sources: [],
+      disclaimer: "",
+      showSources: false,
+      showDisclaimer: false,
     },
   ]);
+
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -16,9 +21,13 @@ function App() {
   const [speechSupported, setSpeechSupported] = useState(true);
 
   const recognitionRef = useRef(null);
-  const disease = "Type 2 Diabetes"; // fixed disease
+  const audioRef = useRef(null);
 
-  // Speech recognition setup
+  const disease = "Type 2 Diabetes";
+
+  // -------------------------------------------------------------------
+  // SPEECH RECOGNITION SETUP
+  // -------------------------------------------------------------------
   useEffect(() => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -42,7 +51,7 @@ function App() {
 
     recognition.onresult = (event) => {
       const transcript = Array.from(event.results)
-        .map((result) => result[0].transcript)
+        .map((r) => r[0].transcript)
         .join(" ");
       setInput((prev) => (prev ? prev + " " + transcript : transcript));
     };
@@ -50,97 +59,137 @@ function App() {
     recognitionRef.current = recognition;
   }, []);
 
-  // ======================================================
-  // ✅ UPDATED: Real backend call
-  // ======================================================
+  // -------------------------------------------------------------------
+  // TTS FUNCTION (FIXED VERSION — uses data URL, works reliably)
+  // -------------------------------------------------------------------
+  const requestTTS = async (text) => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      const data = await res.json();
+
+      if (data.audio) {
+        // Build data URL directly — safest method
+        const audioURL = `data:audio/mp3;base64,${data.audio}`;
+
+        if (audioRef.current) {
+          audioRef.current.src = audioURL;
+          await audioRef.current.play().catch(() => {
+            console.warn("Autoplay blocked, waiting for user interaction");
+          });
+        }
+      }
+    } catch (err) {
+      console.error("TTS error:", err);
+    }
+  };
+
+  // -------------------------------------------------------------------
+  // UNLOCK AUTOPLAY AFTER FIRST USER INTERACTION
+  // (Chrome requires this!)
+  // -------------------------------------------------------------------
+  const unlockAutoplay = () => {
+    if (audioRef.current) {
+      audioRef.current.play().catch(() => {});
+    }
+  };
+
+  // -------------------------------------------------------------------
+  // INTRO GREETING VOICE ON PAGE LOAD
+  // -------------------------------------------------------------------
+  useEffect(() => {
+    const intro = messages[0].content;
+    requestTTS(intro);
+  }, []);
+
+  // -------------------------------------------------------------------
+  // CALL BACKEND
+  // -------------------------------------------------------------------
   const callBackend = async (userMessage) => {
     try {
       const res = await fetch("http://127.0.0.1:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMessage,
-          disease: disease,
-        }),
+        body: JSON.stringify({ message: userMessage, disease }),
       });
 
       if (!res.ok) {
-        console.error("Backend returned error:", res.status);
-        return "⚠️ Sorry, I couldn't reach the backend. Please try again.";
+        return {
+          answer:
+            "⚠️ Sorry, I couldn't reach the backend. Please try again.",
+          sources: [],
+          disclaimer: "",
+        };
       }
 
-      const data = await res.json();
-      return data.answer; // Use model’s answer
-    } catch (error) {
-      console.error("Network error:", error);
-      return "⚠️ A network error occurred while contacting the backend.";
+      return await res.json();
+    } catch (err) {
+      console.error("network error", err);
+      return {
+        answer: "⚠️ Network error occurred while contacting backend.",
+        sources: [],
+        disclaimer: "",
+      };
     }
   };
 
-  // ======================================================
-  // Sending messages
-  // ======================================================
+  // -------------------------------------------------------------------
+  // SEND MESSAGE
+  // -------------------------------------------------------------------
   const handleSend = async () => {
+    unlockAutoplay(); // <-- unlock audio playback for Chrome
+
     const trimmed = input.trim();
     if (!trimmed || isLoading) return;
 
-    // Add user message immediately
     const userMsg = { role: "user", content: trimmed };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
 
     try {
-      // ---- CALL BACKEND ----
-      const res = await fetch("http://127.0.0.1:8000/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: trimmed,
-          disease: "Type 2 Diabetes"
-        }),
-      });
+      const backend = await callBackend(trimmed);
 
-      if (!res.ok) {
-        throw new Error("Backend error");
-      }
-
-      const data = await res.json();
-
-      // ---- ASSISTANT MESSAGE FORMAT ----
       const botMsg = {
         role: "assistant",
-        content: data.answer,
-        sources: data.sources || [],
-        disclaimer: data.disclaimer || "⚠️ The information provided is for general educational purposes only and is not a substitute for medical advice.",
+        content: backend.answer,
+        sources: backend.sources || [],
+        disclaimer:
+          backend.disclaimer ||
+          "⚠️ The information provided is for education only.",
         showSources: false,
         showDisclaimer: false,
       };
 
-      // Add assistant message
       setMessages((prev) => [...prev, botMsg]);
 
+      // Speak only the non-disclaimer part
+      const mainAnswer = backend.answer.split("---")[0].trim();
+      requestTTS(mainAnswer);
     } catch (err) {
       console.error("Chat backend error:", err);
 
       const errorMsg = {
         role: "assistant",
         content:
-          "⚠️ Sorry, I encountered an error retrieving the answer. Please try again.",
+          "⚠️ Sorry, I encountered a backend error while generating the answer.",
         sources: [],
         disclaimer: "",
-        showSources: false,
-        showDisclaimer: false
       };
 
       setMessages((prev) => [...prev, errorMsg]);
-
     } finally {
       setIsLoading(false);
     }
   };
 
-
+  // -------------------------------------------------------------------
+  // ENTER KEY TO SEND
+  // -------------------------------------------------------------------
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -148,46 +197,42 @@ function App() {
     }
   };
 
-  // Microphone button
+  // -------------------------------------------------------------------
+  // MICROPHONE CLICK
+  // -------------------------------------------------------------------
   const handleMicClick = () => {
     if (!speechSupported) {
-      alert(
-        "Speech recognition is not supported in this browser. Try using Google Chrome on desktop."
-      );
+      alert("Speech recognition not supported here. Try Chrome desktop.");
       return;
     }
-    if (!recognitionRef.current) return;
 
-    if (isListening) {
-      recognitionRef.current.stop();
-    } else {
-      recognitionRef.current.start();
-    }
+    if (isListening) recognitionRef.current.stop();
+    else recognitionRef.current.start();
   };
 
-  // ======================================================
+  // -------------------------------------------------------------------
   // UI
-  // ======================================================
-    return (
+  // -------------------------------------------------------------------
+  return (
     <div className="app">
       <div className="app-inner">
-        
+        {/* hidden audio player */}
+        <audio ref={audioRef} hidden />
+
         {/* HEADER */}
         <header className="app-header">
           <div className="app-title-row">
             <span className="logo">🩺</span>
             <div>
               <h1>TrustMedAI – Type 2 Diabetes Chat</h1>
-              <p>Ask educational questions about Type 2 Diabetes. Not a substitute for a doctor.</p>
+              <p>Ask educational questions about Type 2 Diabetes.</p>
             </div>
           </div>
 
           <div className="pill-reset-bar">
             <span className="pill">Type 2 Diabetes</span>
-
             <button
               className="reset-btn"
-              type="button"
               onClick={() => {
                 setMessages([
                   {
@@ -197,6 +242,9 @@ function App() {
                   },
                 ]);
                 setInput("");
+                requestTTS(
+                  "Hi, I’m TrustMedAI. I can answer educational questions about Type 2 Diabetes. What would you like to know?"
+                );
               }}
             >
               Reset
@@ -204,11 +252,9 @@ function App() {
           </div>
         </header>
 
-        {/* CHAT + INPUT */}
+        {/* CHAT */}
         <main className="chat-container">
           <div className="chat-window">
-
-            {/* MESSAGES */}
             {messages.map((msg, idx) => (
               <div
                 key={idx}
@@ -223,10 +269,8 @@ function App() {
                 </div>
 
                 <div className="message-bubble">
-                  
-                  {/* MAIN MESSAGE TEXT */}
+                  {/* MAIN TEXT */}
                   {msg.content.split("\n").map((line, i) => {
-                    // blockquote handling
                     if (line.startsWith(">")) {
                       return (
                         <p key={i} className="quote">
@@ -235,33 +279,42 @@ function App() {
                       );
                     }
 
-                    // simple **bold** handling
                     const parts = line.split(/(\*\*.*?\*\*)/g);
                     return (
                       <p key={i}>
-                        {parts.map((part, j) => {
-                          if (part.startsWith("**") && part.endsWith("**")) {
-                            return (
-                              <strong key={j}>
-                                {part.replace(/\*\*/g, "")}
-                              </strong>
-                            );
-                          }
-                          return <span key={j}>{part}</span>;
-                        })}
+                        {parts.map((part, j) =>
+                          part.startsWith("**") && part.endsWith("**") ? (
+                            <strong key={j}>{part.replace(/\*\*/g, "")}</strong>
+                          ) : (
+                            <span key={j}>{part}</span>
+                          )
+                        )}
                       </p>
                     );
                   })}
 
-                  {/* ASSISTANT → SHOW BUTTONS */}
-                  {msg.role === "assistant" && msg.sources && (
+                  {/* LISTEN AGAIN */}
+                  {msg.role === "assistant" && (
+                    <button
+                      className="listen-btn"
+                      onClick={() => {
+                        const clean = msg.content.split("---")[0].trim();
+                        requestTTS(clean);
+                      }}
+                    >
+                      🔊 Listen
+                    </button>
+                  )}
+
+                  {/* EXPAND BUTTONS */}
+                  {msg.role === "assistant" && (
                     <div className="expand-buttons">
                       <button
                         className="expand-btn"
                         onClick={() => {
-                          const newMsgs = [...messages];
-                          newMsgs[idx].showSources = !newMsgs[idx].showSources;
-                          setMessages(newMsgs);
+                          const copy = [...messages];
+                          copy[idx].showSources = !copy[idx].showSources;
+                          setMessages(copy);
                         }}
                       >
                         {msg.showSources ? "Hide Sources" : "View Sources"}
@@ -270,15 +323,13 @@ function App() {
                       <button
                         className="expand-btn"
                         onClick={() => {
-                          const newMsgs = [...messages];
-                          newMsgs[idx].showDisclaimer =
-                            !newMsgs[idx].showDisclaimer;
-                          setMessages(newMsgs);
+                          const copy = [...messages];
+                          copy[idx].showDisclaimer =
+                            !copy[idx].showDisclaimer;
+                          setMessages(copy);
                         }}
                       >
-                        {msg.showDisclaimer
-                          ? "Hide Disclaimer"
-                          : "Disclaimer"}
+                        {msg.showDisclaimer ? "Hide Disclaimer" : "Disclaimer"}
                       </button>
                     </div>
                   )}
@@ -326,7 +377,6 @@ function App() {
             <button
               className={`mic-btn ${isListening ? "listening" : ""}`}
               onClick={handleMicClick}
-              type="button"
             >
               {isListening ? "🎙️ Listening..." : "🎤 Speak"}
             </button>
@@ -337,7 +387,6 @@ function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              rows={2}
             />
 
             <button
@@ -350,16 +399,13 @@ function App() {
           </div>
         </main>
 
-        {/* FOOTER */}
         <footer className="app-footer">
-          ⚠️ TrustMedAI is for educational purposes only and does not provide
-          medical diagnoses or treatment decisions. Always consult a healthcare
-          professional.
+          ⚠️ TrustMedAI is for educational purposes only. Always consult a
+          healthcare professional.
         </footer>
       </div>
     </div>
   );
-
 }
 
 export default App;

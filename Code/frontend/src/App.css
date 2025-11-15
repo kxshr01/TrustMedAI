@@ -408,4 +408,19 @@ body {
   font-size: 0.85rem;
   color: #d1d5db;
 }
+.listen-btn {
+  margin-top: 8px;
+  background: #1e40af;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.listen-btn:hover {
+  background: #1d4ed8;
+}
+
 }

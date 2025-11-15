@@ -5,9 +5,12 @@ from dotenv import load_dotenv
 import os
 from fastapi.middleware.cors import CORSMiddleware
 from .answer_generator import generate_answer
+from .tts import router as tts_router
+
 
 load_dotenv()
 app = FastAPI()
+app.include_router(tts_router)
 
 origins = [
     "http://localhost:5173",

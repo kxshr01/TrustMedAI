@@ -88,7 +88,7 @@ def generate_answer(question: str, disease="Type 2 Diabetes", k: int = 5) -> Dic
     <Answer in short bullet points>
 
     Do you have any more questions? Or Would you like me to help you schedule an appointment with a doctor or clinic?
-
+    -------------------------------------
     """).strip()
 
     # --------------------------------------------------------
