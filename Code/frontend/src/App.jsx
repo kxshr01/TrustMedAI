@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
 function App() {
+  // ===========================================================
+  // STATE
+  // ===========================================================
   const [messages, setMessages] = useState([
     {
       role: "assistant",
@@ -13,141 +16,236 @@ function App() {
       showDisclaimer: false,
     },
   ]);
-
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // NEW: TTS toggle
+  const [ttsMode, setTtsMode] = useState("summary"); // "summary" | "full"
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
 
   const recognitionRef = useRef(null);
   const audioRef = useRef(null);
+  const introPlayedRef = useRef(false);
 
   const disease = "Type 2 Diabetes";
 
-  // -------------------------------------------------------------------
-  // SPEECH RECOGNITION SETUP
-  // -------------------------------------------------------------------
+  // ===========================================================
+  // SPEECH RECOGNITION
+  // ===========================================================
   useEffect(() => {
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
       setSpeechSupported(false);
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.continuous = false;
+    rec.interimResults = false;
 
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = (event) => {
-      console.error("Speech recognition error:", event.error);
-      setIsListening(false);
-    };
+    rec.onstart = () => setIsListening(true);
+    rec.onend = () => setIsListening(false);
+    rec.onerror = () => setIsListening(false);
 
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
+    rec.onresult = (e) => {
+      const text = Array.from(e.results)
         .map((r) => r[0].transcript)
         .join(" ");
-      setInput((prev) => (prev ? prev + " " + transcript : transcript));
+      setInput((prev) => (prev ? prev + " " + text : text));
     };
 
-    recognitionRef.current = recognition;
+    recognitionRef.current = rec;
   }, []);
 
-  // -------------------------------------------------------------------
-  // TTS FUNCTION (FIXED VERSION — uses data URL, works reliably)
-  // -------------------------------------------------------------------
-  const requestTTS = async (text) => {
-    try {
-      const res = await fetch("http://127.0.0.1:8000/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
+  // ===========================================================
+  // CLEANER FOR TTS (markdown → natural speech)
+  // ===========================================================
+  const cleanForTTS = (text) => {
+    if (!text) return "";
+    let cleaned = text;
 
-      const data = await res.json();
+    // Remove disclaimers (anything after ---)
+    cleaned = cleaned.split("---")[0];
 
-      if (data.audio) {
-        // Build data URL directly — safest method
-        const audioURL = `data:audio/mp3;base64,${data.audio}`;
+    // Remove markdown bold ** **
+    cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, "$1");
 
-        if (audioRef.current) {
-          audioRef.current.src = audioURL;
-          await audioRef.current.play().catch(() => {
-            console.warn("Autoplay blocked, waiting for user interaction");
-          });
-        }
-      }
-    } catch (err) {
-      console.error("TTS error:", err);
-    }
+    // Replace bullets with natural commas
+    cleaned = cleaned.replace(/^\s*\*\s*/gm, "");
+
+    // Remove markdown quotes >
+    cleaned = cleaned.replace(/^>\s*/gm, "");
+
+    // Remove extra line breaks
+    cleaned = cleaned.replace(/\n{2,}/g, ". ");
+    cleaned = cleaned.replace(/\n/g, ". ");
+
+    // Remove URLs
+    cleaned = cleaned.replace(/https?:\/\/\S+/g, "");
+
+    // Remove [brackets]
+    cleaned = cleaned.replace(/\[(.*?)\]/g, "$1");
+
+    cleaned = cleaned.trim();
+    if (!cleaned.endsWith(".")) cleaned += ".";
+
+    return cleaned;
   };
 
-  // -------------------------------------------------------------------
-  // UNLOCK AUTOPLAY AFTER FIRST USER INTERACTION
-  // (Chrome requires this!)
-  // -------------------------------------------------------------------
-  const unlockAutoplay = () => {
+const stopSpeaking = () => {
+  if (audioRef.current) {
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+  }
+  setIsSpeaking(false);
+};
+
+  // ===========================================================
+  // AUTO-SUMMARY (short spoken version)
+  // Extracts first key sentences & first 4–6 bullet points
+  // ===========================================================
+  const summarizeForTTS = (text) => {
+    if (!text) return "";
+
+    const main = text.split("---")[0];
+
+    const lines = main.split("\n").map((l) => l.trim());
+
+    const bulletPoints = lines.filter((l) => l.startsWith("*"));
+    const sentences = main.split(/[.!?]/).map((s) => s.trim()).filter(Boolean);
+
+    let summary = "";
+
+    if (bulletPoints.length > 0) {
+      summary +=
+        "Here are the key points: " +
+        bulletPoints
+          .slice(0, 5)
+          .map((b) => b.replace("*", "").trim())
+          .join(", ") +
+        ". ";
+    } else {
+      summary += sentences.slice(0, 2).join(". ") + ". ";
+    }
+
+    return summary.trim();
+  };
+
+  // ===========================================================
+  // TTS REQUEST (ElevenLabs)
+  // ===========================================================
+const requestTTS = async (text) => {
+  try {
+    // Stop any previous audio 
     if (audioRef.current) {
-      audioRef.current.play().catch(() => {});
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
     }
-  };
 
-  // -------------------------------------------------------------------
-  // INTRO GREETING VOICE ON PAGE LOAD
-  // -------------------------------------------------------------------
+    const res = await fetch("http://127.0.0.1:8000/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+
+    const data = await res.json();
+
+    if (data.audio && audioRef.current) {
+      const url = `data:audio/mp3;base64,${data.audio}`;
+      audioRef.current.src = url;
+
+      setIsSpeaking(true);
+
+      audioRef.current.play()
+        .then(() => {
+          // When audio finishes, disable speaking state
+          audioRef.current.onended = () => {
+            setIsSpeaking(false);
+          };
+        })
+        .catch(() => {
+          setIsSpeaking(false);
+        });
+    }
+  } catch (err) {
+    console.error("TTS error:", err);
+    setIsSpeaking(false);
+  }
+};
+
+
+  // ===========================================================
+  // AUTOPLAY UNLOCK (Chrome)
+  // ===========================================================
   useEffect(() => {
-    const intro = messages[0].content;
-    requestTTS(intro);
+    const unlock = () => {
+      if (audioRef.current) {
+        const silent =
+          "data:audio/mp3;base64,SUQzBAAAAAAAF1RTU0UAAAAPAAADTGF2ZjU2LjMyLjEwNAAAAAAAAAAAAAAA//tQxA...";
+        audioRef.current.src = silent;
+        audioRef.current.play().catch(() => {});
+      }
+      window.removeEventListener("click", unlock);
+    };
+    window.addEventListener("click", unlock);
   }, []);
 
-  // -------------------------------------------------------------------
-  // CALL BACKEND
-  // -------------------------------------------------------------------
-  const callBackend = async (userMessage) => {
+  // ===========================================================
+  // INTRO TTS (only after first user click)
+  // ===========================================================
+  useEffect(() => {
+    const speakIntro = () => {
+      if (!introPlayedRef.current) {
+        requestTTS(messages[0].content);
+        introPlayedRef.current = true;
+      }
+      window.removeEventListener("click", speakIntro);
+    };
+
+    window.addEventListener("click", speakIntro);
+  }, [messages]);
+
+  // ===========================================================
+  // BACKEND CALL
+  // ===========================================================
+  const callBackend = async (msg) => {
     try {
       const res = await fetch("http://127.0.0.1:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMessage, disease }),
+        body: JSON.stringify({ message: msg, disease }),
       });
 
       if (!res.ok) {
         return {
-          answer:
-            "⚠️ Sorry, I couldn't reach the backend. Please try again.",
+          answer: "⚠️ Backend unreachable. Please try again.",
           sources: [],
           disclaimer: "",
         };
       }
-
       return await res.json();
-    } catch (err) {
-      console.error("network error", err);
+    } catch {
       return {
-        answer: "⚠️ Network error occurred while contacting backend.",
+        answer: "⚠️ Network error contacting backend.",
         sources: [],
         disclaimer: "",
       };
     }
   };
 
-  // -------------------------------------------------------------------
+  // ===========================================================
   // SEND MESSAGE
-  // -------------------------------------------------------------------
+  // ===========================================================
   const handleSend = async () => {
-    unlockAutoplay(); // <-- unlock audio playback for Chrome
-
+    stopSpeaking();
     const trimmed = input.trim();
     if (!trimmed || isLoading) return;
 
-    const userMsg = { role: "user", content: trimmed };
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setInput("");
     setIsLoading(true);
 
@@ -160,36 +258,27 @@ function App() {
         sources: backend.sources || [],
         disclaimer:
           backend.disclaimer ||
-          "⚠️ The information provided is for education only.",
+          "⚠️ The information provided is for educational purposes only.",
         showSources: false,
         showDisclaimer: false,
       };
 
       setMessages((prev) => [...prev, botMsg]);
 
-      // Speak only the non-disclaimer part
-      const mainAnswer = backend.answer.split("---")[0].trim();
-      requestTTS(mainAnswer);
-    } catch (err) {
-      console.error("Chat backend error:", err);
-
-      const errorMsg = {
-        role: "assistant",
-        content:
-          "⚠️ Sorry, I encountered a backend error while generating the answer.",
-        sources: [],
-        disclaimer: "",
-      };
-
-      setMessages((prev) => [...prev, errorMsg]);
+      // --- TTS MODE handling ---
+      let speakText = "";
+      if (ttsMode === "summary") {
+        speakText = summarizeForTTS(backend.answer);
+      } else {
+        speakText = cleanForTTS(backend.answer);
+      }
+      requestTTS(speakText);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // -------------------------------------------------------------------
-  // ENTER KEY TO SEND
-  // -------------------------------------------------------------------
+  // ENTER → SEND
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -197,26 +286,22 @@ function App() {
     }
   };
 
-  // -------------------------------------------------------------------
-  // MICROPHONE CLICK
-  // -------------------------------------------------------------------
+  // MIC CLICK
   const handleMicClick = () => {
     if (!speechSupported) {
-      alert("Speech recognition not supported here. Try Chrome desktop.");
+      alert("Speech recognition unsupported on this device.");
       return;
     }
-
     if (isListening) recognitionRef.current.stop();
     else recognitionRef.current.start();
   };
 
-  // -------------------------------------------------------------------
+  // ===========================================================
   // UI
-  // -------------------------------------------------------------------
+  // ===========================================================
   return (
     <div className="app">
       <div className="app-inner">
-        {/* hidden audio player */}
         <audio ref={audioRef} hidden />
 
         {/* HEADER */}
@@ -231,6 +316,19 @@ function App() {
 
           <div className="pill-reset-bar">
             <span className="pill">Type 2 Diabetes</span>
+
+            {/* NEW — TTS MODE TOGGLE */}
+            <button
+              className="reset-btn"
+              onClick={() =>
+                setTtsMode((prev) =>
+                  prev === "summary" ? "full" : "summary"
+                )
+              }
+            >
+              🔊 TTS: {ttsMode === "summary" ? "Summary" : "Full Answer"}
+            </button>
+
             <button
               className="reset-btn"
               onClick={() => {
@@ -239,9 +337,10 @@ function App() {
                     role: "assistant",
                     content:
                       "Hi, I’m TrustMedAI. I can answer educational questions about Type 2 Diabetes. What would you like to know?",
+                    sources: [],
+                    disclaimer: "",
                   },
                 ]);
-                setInput("");
                 requestTTS(
                   "Hi, I’m TrustMedAI. I can answer educational questions about Type 2 Diabetes. What would you like to know?"
                 );
@@ -258,11 +357,9 @@ function App() {
             {messages.map((msg, idx) => (
               <div
                 key={idx}
-                className={
-                  msg.role === "user"
-                    ? "message-row user"
-                    : "message-row assistant"
-                }
+                className={`message-row ${
+                  msg.role === "user" ? "user" : "assistant"
+                }`}
               >
                 <div className="avatar">
                   {msg.role === "user" ? "🧑" : "🤖"}
@@ -271,22 +368,21 @@ function App() {
                 <div className="message-bubble">
                   {/* MAIN TEXT */}
                   {msg.content.split("\n").map((line, i) => {
-                    if (line.startsWith(">")) {
+                    if (line.startsWith(">"))
                       return (
                         <p key={i} className="quote">
-                          {line.slice(1).trim()}
+                          {line.slice(1)}
                         </p>
                       );
-                    }
 
                     const parts = line.split(/(\*\*.*?\*\*)/g);
                     return (
                       <p key={i}>
-                        {parts.map((part, j) =>
-                          part.startsWith("**") && part.endsWith("**") ? (
-                            <strong key={j}>{part.replace(/\*\*/g, "")}</strong>
+                        {parts.map((p, j) =>
+                          p.startsWith("**") && p.endsWith("**") ? (
+                            <strong key={j}>{p.replace(/\*\*/g, "")}</strong>
                           ) : (
-                            <span key={j}>{part}</span>
+                            <span key={j}>{p}</span>
                           )
                         )}
                       </p>
@@ -298,8 +394,11 @@ function App() {
                     <button
                       className="listen-btn"
                       onClick={() => {
-                        const clean = msg.content.split("---")[0].trim();
-                        requestTTS(clean);
+                        let speakText =
+                          ttsMode === "summary"
+                            ? summarizeForTTS(msg.content)
+                            : cleanForTTS(msg.content);
+                        requestTTS(speakText);
                       }}
                     >
                       🔊 Listen
@@ -319,7 +418,6 @@ function App() {
                       >
                         {msg.showSources ? "Hide Sources" : "View Sources"}
                       </button>
-
                       <button
                         className="expand-btn"
                         onClick={() => {
@@ -339,10 +437,10 @@ function App() {
                     <div className="collapsible-box">
                       <h4>Sources Used:</h4>
                       <ul>
-                        {msg.sources.map((src, i) => (
+                        {msg.sources.map((s, i) => (
                           <li key={i}>
-                            {src.source} — {src.section}
-                            {src.subsection && ` / ${src.subsection}`}
+                            {s.source} — {s.section}
+                            {s.subsection && ` / ${s.subsection}`}
                           </li>
                         ))}
                       </ul>
@@ -383,7 +481,7 @@ function App() {
 
             <textarea
               className="chat-input"
-              placeholder="Ask a question about Type 2 Diabetes..."
+              placeholder="Ask a question..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -391,17 +489,17 @@ function App() {
 
             <button
               className="send-btn"
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
+              onClick={isSpeaking ? stopSpeaking : handleSend}
+              disabled={isLoading || (!input.trim() && !isSpeaking)}
             >
-              {isLoading ? "Sending..." : "Send"}
+              {isSpeaking ? "🛑 Stop" : isLoading ? "Sending..." : "Send"}
             </button>
           </div>
         </main>
 
+        {/* FOOTER */}
         <footer className="app-footer">
-          ⚠️ TrustMedAI is for educational purposes only. Always consult a
-          healthcare professional.
+          ⚠️ TrustMedAI is for educational purposes only.
         </footer>
       </div>
     </div>
