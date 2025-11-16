@@ -32,6 +32,11 @@ T2DM_SOURCES = [
         "id": "nih_niddk_t2dm",
         "site": "nih",
         "url": "https://www.niddk.nih.gov/health-information/diabetes/overview/what-is-diabetes/type-2-diabetes",
+    },
+    {
+        "id": "ada_t2dm",
+        "site": "ada",
+        "url": "https://diabetes.org/about-diabetes/a1c",
     }
 ]
 

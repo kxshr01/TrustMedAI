@@ -5,8 +5,8 @@ from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
 
-PROCESSED_DIR = Path("Data/processed")
-EMBED_DIR = Path("Data/embeddings")
+PROCESSED_DIR = Path("/Users/kaushikrajesh/Desktop/SEM3/SWM/TrustMedAI/Data/processed")
+EMBED_DIR = Path("/Users/kaushikrajesh/Desktop/SEM3/SWM/TrustMedAI/Data/embeddings")
 EMBED_DIR.mkdir(exist_ok=True, parents=True)
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
